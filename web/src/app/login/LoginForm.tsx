@@ -1,16 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { getSupabaseBrowser } from "@/lib/supabase/browser";
 
 export function LoginForm() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "sent" | "error">(
     "idle",
   );
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleMagicLink(e: React.FormEvent) {
     e.preventDefault();
     setStatus("loading");
     setError(null);
@@ -33,6 +36,26 @@ export function LoginForm() {
     setStatus("sent");
   }
 
+  async function handlePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setStatus("loading");
+    setError(null);
+
+    const supabase = getSupabaseBrowser();
+    const { error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (authError) {
+      setError(authError.message);
+      setStatus("error");
+      return;
+    }
+    router.push("/");
+    router.refresh();
+  }
+
   if (status === "sent") {
     return (
       <div className="space-y-3">
@@ -52,7 +75,10 @@ export function LoginForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form
+      onSubmit={password ? handlePassword : handleMagicLink}
+      className="space-y-4"
+    >
       <div className="space-y-1.5">
         <label htmlFor="email" className="text-xs text-ink-muted">
           Email corporativo
@@ -69,6 +95,21 @@ export function LoginForm() {
         />
       </div>
 
+      <div className="space-y-1.5">
+        <label htmlFor="password" className="text-xs text-ink-muted">
+          Senha <span className="text-ink-dim">(opcional)</span>
+        </label>
+        <input
+          id="password"
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Deixe vazio para usar link mágico"
+          className="input"
+        />
+      </div>
+
       {error && (
         <div className="rounded-md bg-danger-500/15 text-danger-400 p-3 text-xs">
           {error}
@@ -80,7 +121,13 @@ export function LoginForm() {
         disabled={status === "loading"}
         className="btn-primary w-full"
       >
-        {status === "loading" ? "Enviando..." : "Enviar link mágico"}
+        {status === "loading"
+          ? password
+            ? "Entrando..."
+            : "Enviando..."
+          : password
+            ? "Entrar com senha"
+            : "Enviar link mágico"}
       </button>
     </form>
   );
