@@ -1,0 +1,48 @@
+# === Segredos ===
+.env
+.env.local
+.env.*.local
+files/.env
+
+# === Claude Code local config ===
+.claude/
+
+# === Python (bot) ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# === Logs e estado local do bot ===
+*.log
+files/bot.log
+files/bot_err.log
+files/bot_data.pickle
+files/pending_sync.db
+files/mnt/
+
+# === Node / Next.js (web) ===
+node_modules/
+.next/
+out/
+.vercel
+.turbo
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo

@@ -1,0 +1,72 @@
+# ===================================================
+# DEPENDÊNCIAS DO BOT TELEGRAM - GESTÃO FINANCEIRA
+# ===================================================
+# 
+# Instalação: pip install -r requirements.txt
+# Ambiente virtual recomendado!
+#
+# ===================================================
+
+# ===== TELEGRAM BOT =====
+python-telegram-bot[job-queue]==22.7
+# Framework para bots do Telegram (com APScheduler para tarefas agendadas)
+
+# ===== EXTRAÇÃO INTELIGENTE (Motor Principal) =====
+google-genai>=1.0.0
+# SDK oficial do Google Gemini AI (visão computacional para documentos)
+
+pydantic>=2.0.0
+# Schema estruturado para garantir JSON válido do Gemini
+
+# ===== OCR FALLBACK (Motor Local) =====
+pytesseract==0.3.10
+# Wrapper Python para Tesseract OCR (fallback sem internet)
+
+Pillow>=10.1.0
+# Processamento de imagens
+
+PyPDF2>=3.0.1
+# Leitura e manipulação de PDFs
+
+# ===== BANCO DE DADOS =====
+supabase>=2.3.0
+# Cliente oficial para Supabase (banco na nuvem)
+
+# ===== CONFIGURAÇÃO =====
+python-dotenv>=1.0.0
+# Carregar variáveis de ambiente do .env
+
+# ===== HTTP =====
+requests>=2.31.0
+# Requisições HTTP
+
+# ===== DATA E TEMPO =====
+python-dateutil>=2.8.2
+# Manipulação avançada de datas
+
+# ===== UTILITÁRIOS =====
+certifi>=2023.11.17
+# Certificados SSL
+
+charset-normalizer>=3.3.2
+# Detecção de encoding
+
+idna>=3.6
+# Internacionalização de nomes de domínio
+
+urllib3>=2.1.0
+# Cliente HTTP
+
+# ===== NOTAS =====
+# 
+# 1. Gemini AI (google-genai):
+#    - Chave API gratuita em: https://aistudio.google.com/
+#    - Adicionar GEMINI_API_KEY no .env
+#    - Free tier: ~1500 requests/dia
+#
+# 2. Tesseract OCR (fallback, OPCIONAL):
+#    - Ubuntu/Debian: sudo apt-get install tesseract-ocr tesseract-ocr-por
+#    - MacOS: brew install tesseract
+#    - Windows: https://github.com/UB-Mannheim/tesseract/wiki
+#
+# ===================================================

@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    background-image:
+      radial-gradient(1200px 600px at 80% -10%, rgba(249, 115, 22, 0.08), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(16, 185, 129, 0.06), transparent 60%);
+    background-attachment: fixed;
+  }
+
+  *::selection {
+    @apply bg-primary-500/30 text-ink;
+  }
+
+  /* Scrollbar — minimal, sem bordas */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgba(154, 167, 191, 0.18);
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(154, 167, 191, 0.32);
+  }
+
+  /* Remove outline padrão; use ring utilitário em componentes */
+  :focus {
+    outline: none;
+  }
+  :focus-visible {
+    @apply ring-2 ring-primary-500/60;
+  }
+}
+
+@layer components {
+  .surface-1 {
+    @apply bg-surface-1 shadow-tier1;
+  }
+  .surface-2 {
+    @apply bg-surface-2 shadow-tier2;
+  }
+  .surface-3 {
+    @apply bg-surface-3;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-surface-3 text-ink;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-all disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-primary {
+    @apply btn text-white bg-gradient-primary hover:brightness-110 active:brightness-95;
+  }
+
+  .btn-ghost {
+    @apply btn bg-surface-2 hover:bg-surface-3 text-ink;
+  }
+
+  .btn-danger {
+    @apply btn bg-danger-500 hover:bg-danger-600 text-white;
+  }
+
+  .input {
+    @apply w-full rounded-md bg-surface-3 px-3 py-2 text-sm text-ink placeholder:text-ink-dim transition-colors focus:bg-surface-4;
+  }
+
+  .card {
+    @apply rounded-lg surface-1 p-5;
+  }
+
+  .section-title {
+    @apply text-xs font-semibold uppercase tracking-wider text-ink-muted;
+  }
+}
