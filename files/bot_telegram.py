@@ -1,7 +1,7 @@
 """
 Bot Telegram - Gestão Financeira Farm Home
 Versão: 2.2 - Supabase + Gemini AI
-Autor: Equipe Farm Home
+Autor: Equipe Farm
 Data: Abril 2026
 """
 
