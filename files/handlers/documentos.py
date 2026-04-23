@@ -56,12 +56,20 @@ async def processar_documento(message: Message) -> str:
         
         # Obter informacoes principais
         data_emissao = dados_extraidos.get('data') or datetime.now().strftime('%Y-%m-%d')
-        data_vencimento = dados_extraidos.get('data_vencimento') or data_emissao
+        # Prioridade: vencimento explícito > 1ª parcela > emissão (último fallback)
+        parcelas_extraidas = dados_extraidos.get('parcelas') or []
+        primeira_parcela_venc = (
+            parcelas_extraidas[0].get('vencimento') if parcelas_extraidas else None
+        )
+        data_vencimento = (
+            dados_extraidos.get('data_vencimento')
+            or primeira_parcela_venc
+            or data_emissao
+        )
         motor = dados_extraidos.get('motor', 'desconhecido')
         obs_extras = dados_extraidos.get('texto_completo', '')
         valor_total = float(dados_extraidos.get('valor', 0.0))
-        parcelas_extraidas = dados_extraidos.get('parcelas', [])
-        
+
         obs = f"Motor: {motor} | {obs_extras[:200]}" if obs_extras else f"Motor: {motor}"
 
         documento_para_salvar = {
@@ -87,8 +95,7 @@ async def processar_documento(message: Message) -> str:
 
             mensagem_final = (
                 f"{mensagem_confirmacao}\n\n"
-                f"✅ *Salvo com sucesso!*\n"
-                f"📋 ID: `{doc_uuid}`"
+                f"✅ *Leitura confirmada e salva.*"
             )
             logger.info(f"Documento {doc_uuid} salvo com sucesso no Supabase")
             return mensagem_final
@@ -129,98 +136,48 @@ def _formatar_data(data_str: str) -> str:
 
 
 def formatar_dados_extraidos(dados: Dict) -> str:
-    """Formatar dados extraídos para exibição bonita no Telegram."""
+    """Formatar dados extraídos para exibição no Telegram.
+
+    Mostra apenas: Tipo, Fornecedor, Valor e Vencimento.
+    Se houver múltiplas parcelas, mostra o 1º vencimento e indica o total de parcelas.
+    """
     tipo = dados.get('tipo', 'DESCONHECIDO')
     fornecedor = dados.get('fornecedor', 'Não identificado')
     valor = dados.get('valor')
     data_emissao = dados.get('data', '')
-    data_vencimento = dados.get('data_vencimento', '')
-    cnpj = dados.get('cnpj', '')
-    motor = dados.get('motor', '')
-    observacoes = dados.get('texto_completo', '')
-    
-    # Formatar valor
+    parcelas = dados.get('parcelas') or []
+
+    # Vencimento: explícito > 1ª parcela > emissão
+    primeira_parcela_venc = parcelas[0].get('vencimento') if parcelas else None
+    data_vencimento = (
+        dados.get('data_vencimento')
+        or primeira_parcela_venc
+        or data_emissao
+    )
+
     if valor and valor > 0:
         valor_str = f"R$ {valor:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.')
     else:
         valor_str = 'Não identificado'
-    
-    # Formatar datas
-    emissao_str = _formatar_data(data_emissao)
+
     vencimento_str = _formatar_data(data_vencimento)
-    
-    # Formatar CNPJ para exibição
-    if cnpj and len(cnpj) == 14:
-        cnpj_fmt = f"{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:]}"
-    else:
-        cnpj_fmt = cnpj or 'Não identificado'
-    
-    # Emoji por tipo
+    if len(parcelas) > 1:
+        vencimento_str = f"{vencimento_str} (1ª de {len(parcelas)}x)"
+
     emojis = {
-        'NFE': '📄',
-        'BOLETO': '💳',
-        'PEDIDO': '📦',
-        'OS': '🔧',
-        'RECIBO': '🧾',
-        'EXTRATO': '📊',
-        'OUTRO': '📋',
-        'DESCONHECIDO': '❓',
+        'NFE': '📄', 'BOLETO': '💳', 'PEDIDO': '📦', 'OS': '🔧',
+        'RECIBO': '🧾', 'EXTRATO': '📊', 'OUTRO': '📋', 'DESCONHECIDO': '❓',
     }
     emoji = emojis.get(tipo, '📋')
-    
-    # Motor de extração
-    motor_emoji = '🤖' if 'gemini' in motor else '📝'
-    motor_label = 'Gemini AI' if 'gemini' in motor else 'Tesseract OCR' if 'tesseract' in motor else motor
-    
-    # Montar mensagem
+
     linhas = [
-        f"{emoji} *Documento Processado*",
-        f"",
+        f"{emoji} *Documento lido*",
+        "",
         f"*Tipo:* {tipo}",
         f"*Fornecedor:* {fornecedor}",
-        f"*CNPJ:* {cnpj_fmt}",
-        f"*Valor Total:* {valor_str}",
-        f"*Emissão:* {emissao_str}",
+        f"*Valor:* {valor_str}",
+        f"*Vencimento:* {vencimento_str}",
     ]
-    
-    # Mostrar vencimento separado se for diferente da emissão e se tiver 0 ou 1 parcela (caso tenha mais, listamos depois)
-    parcelas = dados.get('parcelas', [])
-    if (not parcelas or len(parcelas) <= 1) and data_vencimento and data_vencimento != data_emissao:
-        linhas.append(f"*Vencimento:* {vencimento_str}")
-    
-    # Detalhar parcelas se houver mais de uma
-    if parcelas and len(parcelas) > 1:
-        linhas.append(f"")
-        linhas.append(f"💳 *Pagamento Parcelado ({len(parcelas)}x):*")
-        
-        soma_parcelas = 0.0
-        for i, p in enumerate(parcelas, 1):
-            val_p = float(p.get('valor', 0.0))
-            soma_parcelas += val_p
-            venc_p = _formatar_data(p.get('vencimento'))
-            val_p_str = f"R$ {val_p:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.')
-            linhas.append(f"  {i}ª - {venc_p}: {val_p_str}")
-            
-        valor_total = float(valor or 0.0)
-        if abs(soma_parcelas - valor_total) > 0.05:
-            linhas.append(f"")
-            linhas.append(f"⚠️ *DIVERGÊNCIA DE VALORES!*")
-            soma_str = f"R$ {soma_parcelas:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.')
-            linhas.append(f"A soma das parcelas ({soma_str}) difere do Total ({valor_str}).")
-            justificativa = dados.get('justificativa_divergencia', '')
-            if justificativa:
-                linhas.append(f"🤖 *Motivo encontrado:* {justificativa}")
-            else:
-                linhas.append(f"🔍 O bot não encontrou uma justificativa clara no documento.")
-    
-    # Observações relevantes
-    if observacoes:
-        linhas.append(f"")
-        linhas.append(f"*Obs:* {observacoes[:150]}")
-    
-    linhas.append(f"")
-    linhas.append(f"{motor_emoji} _Extraído via {motor_label}_")
-    
     return '\n'.join(linhas)
 
 

@@ -113,22 +113,18 @@ export function CartoesClient() {
           <div className="space-y-4 min-w-0">
             {cartao && (
               <Card>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <div>
                     <p className="text-xs text-ink-muted">Bandeira</p>
                     <p className="font-medium">{cartao.bandeira ?? "—"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-ink-muted">Limite</p>
-                    <p className="font-medium">{fmtBRL(cartao.limite)}</p>
-                  </div>
-                  <div>
                     <p className="text-xs text-ink-muted">Fechamento</p>
-                    <p className="font-medium">dia {cartao.dia_fechamento}</p>
+                    <p className="font-medium">dia {cartao.dia_fechamento ?? "—"}</p>
                   </div>
                   <div>
                     <p className="text-xs text-ink-muted">Vencimento</p>
-                    <p className="font-medium">dia {cartao.dia_vencimento}</p>
+                    <p className="font-medium">dia {cartao.dia_vencimento ?? "—"}</p>
                   </div>
                 </div>
               </Card>

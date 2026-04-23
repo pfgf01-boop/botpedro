@@ -58,7 +58,7 @@ export function DocumentosTable({
             sortAccessor: (r: DashboardDocumento) => r.tipo,
             accessor: (r: DashboardDocumento) => (
               <Chip tone={r.is_fatura_cartao ? "primary" : "neutral"}>
-                {TIPO_DOCUMENTO_LABEL[r.tipo]}
+                {r.tipo ? TIPO_DOCUMENTO_LABEL[r.tipo as keyof typeof TIPO_DOCUMENTO_LABEL] : "—"}
               </Chip>
             ),
             width: "140px",
@@ -112,7 +112,7 @@ export function DocumentosTable({
     <DataTable
       rows={rows}
       columns={columns}
-      rowKey={(r) => r.id}
+      rowKey={(r) => r.id ?? ""}
       loading={loading}
       onRowClick={onRowClick}
       empty="Nenhum documento encontrado com os filtros atuais."

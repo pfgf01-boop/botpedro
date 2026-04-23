@@ -31,7 +31,6 @@ export function NovoExtraModal({ open, onClose }: NovoExtraModalProps) {
   const [fornecedorNovo, setFornecedorNovo] = React.useState("");
   const [valor, setValor] = React.useState("");
   const [vencimento, setVencimento] = React.useState("");
-  const [dataEmissao, setDataEmissao] = React.useState("");
   const [observacao, setObservacao] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -42,7 +41,6 @@ export function NovoExtraModal({ open, onClose }: NovoExtraModalProps) {
     setFornecedorNovo("");
     setValor("");
     setVencimento("");
-    setDataEmissao("");
     setObservacao("");
     setError(null);
   }
@@ -62,41 +60,49 @@ export function NovoExtraModal({ open, onClose }: NovoExtraModalProps) {
     setSaving(true);
     try {
       const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) throw new Error("Sem sessão de usuário.");
+      const authUserId = userData.user?.id;
+      if (!authUserId) throw new Error("Sem sessão de usuário.");
 
       const { data: usuario } = await supabase
         .from("usuarios")
         .select("empresa_id")
-        .eq("id", userId)
+        .eq("auth_user_id", authUserId)
         .single();
       if (!usuario?.empresa_id) throw new Error("Empresa não encontrada.");
 
       let fornId: string | null = fornecedorId || null;
-      if (!fornId && fornecedorNovo.trim()) {
+      let fornecedorNome: string | null = null;
+      if (fornId) {
+        fornecedorNome =
+          fornecedores.find((f) => f.id === fornId)?.nome ?? null;
+      } else if (fornecedorNovo.trim()) {
         const { data: forn, error: e1 } = await supabase
           .from("fornecedores")
-          .insert({
-            empresa_id: usuario.empresa_id,
-            nome: fornecedorNovo.trim(),
-          })
-          .select("id")
+          .insert({ nome: fornecedorNovo.trim() })
+          .select("id, nome")
           .single();
         if (e1) throw e1;
         fornId = forn.id;
+        fornecedorNome = forn.nome;
       }
+
+      // numero_doc é NOT NULL na tabela documentos; como extras não têm número
+      // oficial, geramos um identificador curto baseado em timestamp.
+      const numeroExtra = `EXT-${Date.now().toString(36).toUpperCase()}`;
 
       const { data: doc, error: e2 } = await supabase
         .from("documentos")
         .insert({
           empresa_id: usuario.empresa_id,
           fornecedor_id: fornId,
+          fornecedor_nome: fornecedorNome,
+          numero_doc: numeroExtra,
           tipo: "extra",
           subtipo,
-          valor_total: valorNum,
-          data_emissao: dataEmissao || null,
-          observacao: observacao || null,
-          origem: "web_manual",
+          valor: valorNum,
+          vencimento,
+          status: "pendente",
+          descricao: observacao || null,
         })
         .select("id")
         .single();
@@ -198,17 +204,6 @@ export function NovoExtraModal({ open, onClose }: NovoExtraModalProps) {
             type="date"
             value={vencimento}
             onChange={(e) => setVencimento(e.target.value)}
-          />
-        </div>
-
-        <div className="col-span-2">
-          <label className="text-xs text-ink-muted mb-1 block">
-            Data de emissão (opcional)
-          </label>
-          <Input
-            type="date"
-            value={dataEmissao}
-            onChange={(e) => setDataEmissao(e.target.value)}
           />
         </div>
 

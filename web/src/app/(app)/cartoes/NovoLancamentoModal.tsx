@@ -42,12 +42,13 @@ export function NovoLancamentoModal({ open, onClose, cartaoId }: Props) {
     // Se compra for até o dia de fechamento → competência é o mês atual; senão, mês+1.
     const d = parseISO(compraISO);
     const dia = d.getDate();
+    const fech = c.dia_fechamento ?? 25;
+    const venc = c.dia_vencimento ?? 10;
     let base = d;
-    if (dia > c.dia_fechamento) {
+    if (dia > fech) {
       base = addMonths(d, 1);
     }
-    // O dia da competência = dia_vencimento do cartão, no mês referido.
-    return setDate(base, c.dia_vencimento);
+    return setDate(base, venc);
   }
 
   async function handleSave() {

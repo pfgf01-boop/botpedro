@@ -74,7 +74,7 @@ export function RelatoriosClient() {
         value: (r) => r.fornecedor_nome ?? "—",
       },
       numero: { header: "Número", value: (r) => r.numero ?? "—" },
-      tipo: { header: "Tipo", value: (r) => TIPO_DOCUMENTO_LABEL[r.tipo] },
+      tipo: { header: "Tipo", value: (r) => (r.tipo ? TIPO_DOCUMENTO_LABEL[r.tipo as keyof typeof TIPO_DOCUMENTO_LABEL] : "—") },
       valor_total: {
         header: "Valor",
         value: (r) => Number(r.valor_total ?? 0),
@@ -142,11 +142,11 @@ export function RelatoriosClient() {
         },
         {
           header: "Origem",
-          value: (r) => r.origem,
+          value: (r) => r.origem ?? "—",
         },
         {
           header: "Valor",
-          value: (r) => Number(r.valor),
+          value: (r) => Number(r.valor ?? 0),
           align: "right",
         },
       ],

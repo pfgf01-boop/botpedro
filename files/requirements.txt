@@ -15,6 +15,9 @@ python-telegram-bot[job-queue]==22.7
 google-genai>=1.0.0
 # SDK oficial do Google Gemini AI (visão computacional para documentos)
 
+anthropic>=0.96.0
+# SDK oficial da Anthropic (Claude) - fallback quando Gemini falha/indisponível
+
 pydantic>=2.0.0
 # Schema estruturado para garantir JSON válido do Gemini
 

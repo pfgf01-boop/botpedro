@@ -37,6 +37,9 @@ coverage/
 *.tsbuildinfo
 next-env.d.ts
 
+# === Supabase CLI (artefatos locais) ===
+web/supabase/
+
 # === OS ===
 .DS_Store
 Thumbs.db

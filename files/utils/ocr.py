@@ -22,11 +22,14 @@ from config import (
     GEMINI_API_KEY,
     GEMINI_MODEL,
     GEMINI_TIMEOUT_SEG,
+    ANTHROPIC_API_KEY,
+    CLAUDE_MODEL,
     TESSERACT_CMD,
     TESSERACT_LANG,
     OCR_CONFIDENCE_MIN,
     logger,
 )
+import base64
 
 
 # =============================================================================
@@ -146,39 +149,55 @@ class GeminiExtractor:
         """Verificar se o Gemini está disponível."""
         return self._available
 
-    async def extrair(self, arquivo_bytes: bytes, tipo_arquivo: str) -> Optional[Dict]:
+    def _preparar_imagem(self, arquivo_bytes: bytes, rotacao: int = 0) -> bytes:
+        """Aplica EXIF-transpose, rotação opcional e redimensiona p/ máx 2000px.
+
+        Celular grava foto com tag EXIF de orientação em vez de rotacionar os pixels —
+        alguns visualizadores respeitam, mas o Gemini às vezes vê a versão crua.
+        Normalizar aqui garante que o modelo sempre recebe o texto na horizontal,
+        e o redimensionamento reduz payload/latência sem perder legibilidade.
         """
-        Extrair dados do documento usando Gemini Vision.
-
-        Args:
-            arquivo_bytes: Bytes do arquivo (imagem ou PDF)
-            tipo_arquivo: Extensão do arquivo (jpg, png, pdf)
-
-        Returns:
-            Dict com dados extraídos ou None se falhou
-        """
-        if not self._available:
-            return None
-
         try:
-            from google.genai import types
+            from PIL import Image, ImageOps
 
-            # Mapear extensão → MIME type
-            mime_map = {
-                'jpg': 'image/jpeg',
-                'jpeg': 'image/jpeg',
-                'png': 'image/png',
-                'pdf': 'application/pdf',
-            }
-            mime_type = mime_map.get(tipo_arquivo.lower(), 'image/jpeg')
+            img = Image.open(BytesIO(arquivo_bytes))
+            img = ImageOps.exif_transpose(img)
+            if rotacao:
+                img = img.rotate(-rotacao, expand=True)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
 
-            # Criar parte multimodal com os bytes do documento
-            image_part = types.Part.from_bytes(
-                data=bytes(arquivo_bytes),
-                mime_type=mime_type,
-            )
+            # Limita dimensão maior a 2000px (suficiente pra OCR, muito mais leve)
+            max_dim = 2000
+            if max(img.size) > max_dim:
+                img.thumbnail((max_dim, max_dim), Image.LANCZOS)
 
-            # Chamar Gemini com schema estruturado (resposta forçada em JSON)
+            buf = BytesIO()
+            img.save(buf, format='JPEG', quality=92, optimize=True)
+            return buf.getvalue()
+        except Exception as e:
+            logger.warning(f"⚠️ Pré-processamento falhou ({e}); usando bytes originais")
+            return bytes(arquivo_bytes)
+
+    async def _chamar_gemini(self, arquivo_bytes: bytes, mime_type: str) -> Optional[Dict]:
+        """Uma chamada ao Gemini, com retry automático em 503/429.
+
+        A API do Gemini devolve 503 UNAVAILABLE sob alta demanda (spikes típicos
+        em horário comercial). Retentamos 3× com backoff 2s → 5s → 10s.
+        """
+        from google.genai import types
+
+        image_part = types.Part.from_bytes(
+            data=bytes(arquivo_bytes),
+            mime_type=mime_type,
+        )
+
+        response = None
+        tentativas = [2, 5, 10]  # segundos de espera antes de cada retry
+        for idx, espera in enumerate([0] + tentativas):
+            if espera:
+                logger.info(f"⏳ Gemini sobrecarregado, retry em {espera}s (tentativa {idx+1}/4)")
+                await asyncio.sleep(espera)
             try:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
@@ -188,58 +207,277 @@ class GeminiExtractor:
                         config=types.GenerateContentConfig(
                             response_mime_type="application/json",
                             response_schema=DadosDocumento,
-                            temperature=0.1,  # Baixa para máxima precisão factual
+                            temperature=0.1,
                         ),
                     ),
                     timeout=GEMINI_TIMEOUT_SEG,
                 )
+                break
             except asyncio.TimeoutError:
                 logger.error(f"⏱️ Gemini excedeu timeout de {GEMINI_TIMEOUT_SEG}s")
                 return None
+            except Exception as e:
+                msg = str(e)
+                # 503 (UNAVAILABLE) e 429 (RESOURCE_EXHAUSTED) são transientes — retry
+                if '503' in msg or '429' in msg or 'UNAVAILABLE' in msg.upper() or 'RESOURCE_EXHAUSTED' in msg.upper():
+                    if idx < len(tentativas):
+                        continue
+                    logger.error(f"❌ Gemini indisponível após {len(tentativas)+1} tentativas: {msg[:150]}")
+                    return None
+                logger.error(f"❌ Erro na chamada Gemini: {msg[:200]}")
+                return None
 
-            # Parsear e validar com Pydantic
-            dados_json = json.loads(response.text)
-            dados = DadosDocumento(**dados_json)
-
-            # Limpar CNPJ (garantir apenas dígitos)
-            cnpj_limpo = re.sub(r'[^\d]', '', dados.cnpj)
-            if len(cnpj_limpo) != 14:
-                cnpj_limpo = ''
-
-            logger.info(
-                f"✅ Gemini extraiu: {dados.tipo} | "
-                f"{dados.fornecedor[:40]} | "
-                f"R$ {dados.valor:,.2f} | "
-                f"Parcelas: {len(dados.parcelas)}"
-            )
-
-            # Preparar representação de parcelas
-            parcelas_extraidas = []
-            for p in dados.parcelas:
-                parcelas_extraidas.append({
-                    "valor": p.valor,
-                    "vencimento": p.data_vencimento
-                })
-
-            return {
-                'tipo': dados.tipo.upper().strip(),
-                'cnpj': cnpj_limpo,
-                'fornecedor': dados.fornecedor.strip(),
-                'valor': dados.valor,
-                'data': dados.data_emissao,
-                'parcelas': parcelas_extraidas,
-                'justificativa_divergencia': dados.justificativa_divergencia,
-                'texto_completo': dados.observacoes,
-                'processamento_ok': True,
-                'motor': 'gemini-ai',
-            }
-
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ Gemini retornou JSON inválido: {e}")
+        if response is None:
             return None
+
+        raw_text = getattr(response, 'text', None) or ''
+        if not raw_text.strip():
+            logger.error(f"❌ Gemini devolveu resposta vazia (response={response!r:.200})")
+            return None
+
+        try:
+            dados_json = json.loads(raw_text)
+            dados = DadosDocumento(**dados_json)
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Gemini retornou JSON inválido: {e} | raw={raw_text[:300]!r}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Gemini: validação Pydantic falhou ({e}) | raw={raw_text[:300]!r}")
+            return None
+
+        cnpj_limpo = re.sub(r'[^\d]', '', dados.cnpj)
+        if len(cnpj_limpo) != 14:
+            cnpj_limpo = ''
+
+        parcelas_extraidas = [
+            {"valor": p.valor, "vencimento": p.data_vencimento}
+            for p in dados.parcelas
+        ]
+
+        return {
+            'tipo': dados.tipo.upper().strip(),
+            'cnpj': cnpj_limpo,
+            'fornecedor': dados.fornecedor.strip(),
+            'valor': dados.valor,
+            'data': dados.data_emissao,
+            'parcelas': parcelas_extraidas,
+            'justificativa_divergencia': dados.justificativa_divergencia,
+            'texto_completo': dados.observacoes,
+            'processamento_ok': True,
+            'motor': 'gemini-ai',
+        }
+
+    @staticmethod
+    def _resultado_util(resultado: Optional[Dict]) -> bool:
+        """True se tem fornecedor identificado OU valor > 0."""
+        if not resultado:
+            return False
+        tem_fornecedor = (
+            resultado.get('fornecedor')
+            and resultado['fornecedor'] != 'Não identificado'
+        )
+        tem_valor = resultado.get('valor') and resultado['valor'] > 0
+        return bool(tem_fornecedor or tem_valor)
+
+    async def extrair(self, arquivo_bytes: bytes, tipo_arquivo: str) -> Optional[Dict]:
+        """Extrai dados do documento usando Gemini.
+
+        Estratégia: tenta a imagem original, e se voltar vazia, retenta com
+        rotações de 90°/180°/270° — resolve fotos de celular deitadas de lado.
+        PDF pula o pré-processamento (não é imagem raster simples).
+        """
+        if not self._available:
+            return None
+
+        try:
+            tipo = tipo_arquivo.lower()
+            mime_map = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png', 'pdf': 'application/pdf'}
+            mime_type = mime_map.get(tipo, 'image/jpeg')
+
+            # PDF: chamada direta, sem pré-processamento de imagem
+            if tipo == 'pdf':
+                resultado = await self._chamar_gemini(bytes(arquivo_bytes), mime_type)
+                if resultado:
+                    logger.info(
+                        f"✅ Gemini extraiu: {resultado['tipo']} | "
+                        f"{resultado['fornecedor'][:40]} | "
+                        f"R$ {resultado['valor']:,.2f} | "
+                        f"Parcelas: {len(resultado['parcelas'])}"
+                    )
+                return resultado
+
+            # Imagens: EXIF-transpose na 1ª tentativa; rotações extras se vier vazio
+            for rotacao in (0, 90, 180, 270):
+                bytes_preparados = self._preparar_imagem(arquivo_bytes, rotacao)
+                if rotacao:
+                    logger.info(f"🔄 Tentando novamente com rotação de {rotacao}°")
+                resultado = await self._chamar_gemini(bytes_preparados, 'image/jpeg')
+                if self._resultado_util(resultado):
+                    logger.info(
+                        f"✅ Gemini extraiu: {resultado['tipo']} | "
+                        f"{resultado['fornecedor'][:40]} | "
+                        f"R$ {resultado['valor']:,.2f} | "
+                        f"Parcelas: {len(resultado['parcelas'])}"
+                        + (f" | rotação={rotacao}°" if rotacao else "")
+                    )
+                    return resultado
+
+            logger.warning("⚠️ Gemini não conseguiu extrair dados em nenhuma orientação")
+            return resultado  # devolve o último (pode ter tipo identificado, ainda útil)
+
         except Exception as e:
             logger.error(f"❌ Erro na extração Gemini: {e}")
             return None
+
+
+# =============================================================================
+# EXTRATOR CLAUDE (Fallback quando Gemini falha/indisponível)
+# =============================================================================
+
+class ClaudeExtractor:
+    """Extrator via Claude API (Anthropic). Usado quando Gemini indisponível."""
+
+    def __init__(self):
+        self._client = None
+        self._available = False
+        self._init_client()
+
+    def _init_client(self):
+        if not ANTHROPIC_API_KEY:
+            logger.info("ℹ️ ANTHROPIC_API_KEY não configurada. Fallback Claude desabilitado.")
+            return
+        try:
+            from anthropic import AsyncAnthropic
+            self._client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+            self._available = True
+            logger.info(f"✅ Claude ({CLAUDE_MODEL}) disponível como fallback")
+        except ImportError:
+            logger.warning("⚠️ Pacote 'anthropic' não instalado. Execute: pip install anthropic")
+        except Exception as e:
+            logger.error(f"❌ Erro ao inicializar Claude: {e}")
+
+    @property
+    def disponivel(self) -> bool:
+        return self._available
+
+    async def extrair(self, arquivo_bytes: bytes, tipo_arquivo: str) -> Optional[Dict]:
+        """Extrai dados com Claude usando tool_use pra forçar JSON estruturado."""
+        if not self._available:
+            return None
+
+        mime_map = {
+            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+            'png': 'image/png', 'pdf': 'application/pdf',
+        }
+        mime_type = mime_map.get(tipo_arquivo.lower(), 'image/jpeg')
+        data_b64 = base64.b64encode(bytes(arquivo_bytes)).decode('ascii')
+
+        # Tool schema correspondente ao DadosDocumento do Pydantic
+        extract_tool = {
+            "name": "extrair_dados_documento",
+            "description": "Registra os dados extraídos de um documento fiscal brasileiro.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "tipo": {"type": "string", "description": "NFE, BOLETO, PEDIDO, OS, RECIBO, EXTRATO ou OUTRO"},
+                    "fornecedor": {"type": "string", "description": "Razão social do fornecedor/beneficiário."},
+                    "cnpj": {"type": "string", "description": "CNPJ do fornecedor, 14 dígitos sem formatação."},
+                    "valor": {"type": "number", "description": "Valor total do documento em reais."},
+                    "data_emissao": {"type": "string", "description": "YYYY-MM-DD ou vazio."},
+                    "parcelas": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "valor": {"type": "number"},
+                                "data_vencimento": {"type": "string", "description": "YYYY-MM-DD"},
+                            },
+                            "required": ["valor", "data_vencimento"],
+                        },
+                    },
+                    "justificativa_divergencia": {"type": "string"},
+                    "observacoes": {"type": "string"},
+                },
+                "required": ["tipo", "fornecedor", "valor", "parcelas"],
+            },
+        }
+
+        # Bloco de imagem ou documento (PDF)
+        if mime_type == 'application/pdf':
+            content_block = {
+                "type": "document",
+                "source": {"type": "base64", "media_type": mime_type, "data": data_b64},
+            }
+        else:
+            content_block = {
+                "type": "image",
+                "source": {"type": "base64", "media_type": mime_type, "data": data_b64},
+            }
+
+        try:
+            response = await asyncio.wait_for(
+                self._client.messages.create(
+                    model=CLAUDE_MODEL,
+                    max_tokens=1024,
+                    tools=[extract_tool],
+                    tool_choice={"type": "tool", "name": "extrair_dados_documento"},
+                    messages=[{
+                        "role": "user",
+                        "content": [content_block, {"type": "text", "text": PROMPT_EXTRACAO}],
+                    }],
+                ),
+                timeout=GEMINI_TIMEOUT_SEG,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"⏱️ Claude excedeu timeout de {GEMINI_TIMEOUT_SEG}s")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Erro na chamada Claude: {str(e)[:200]}")
+            return None
+
+        # Extrai o tool_use block
+        tool_use = next(
+            (b for b in response.content if getattr(b, 'type', None) == 'tool_use'),
+            None,
+        )
+        if not tool_use:
+            logger.error("❌ Claude não retornou tool_use block")
+            return None
+
+        try:
+            dados = DadosDocumento(**tool_use.input)
+        except Exception as e:
+            logger.error(f"❌ Claude: validação Pydantic falhou ({e})")
+            return None
+
+        cnpj_limpo = re.sub(r'[^\d]', '', dados.cnpj)
+        if len(cnpj_limpo) != 14:
+            cnpj_limpo = ''
+
+        parcelas_extraidas = [
+            {"valor": p.valor, "vencimento": p.data_vencimento}
+            for p in dados.parcelas
+        ]
+
+        logger.info(
+            f"✅ Claude extraiu: {dados.tipo} | "
+            f"{dados.fornecedor[:40]} | "
+            f"R$ {dados.valor:,.2f} | "
+            f"Parcelas: {len(dados.parcelas)}"
+        )
+
+        return {
+            'tipo': dados.tipo.upper().strip(),
+            'cnpj': cnpj_limpo,
+            'fornecedor': dados.fornecedor.strip(),
+            'valor': dados.valor,
+            'data': dados.data_emissao,
+            'parcelas': parcelas_extraidas,
+            'justificativa_divergencia': dados.justificativa_divergencia,
+            'texto_completo': dados.observacoes,
+            'processamento_ok': True,
+            'motor': 'claude-ai',
+        }
 
 
 # =============================================================================
@@ -466,59 +704,65 @@ class DocumentoOCR:
     """
     Orquestrador de extração de documentos.
 
-    Tenta Gemini AI primeiro (mais preciso, precisa de internet).
-    Se falhar, cai no Tesseract OCR (local, menos preciso).
-    Se ambos falharem, retorna erro.
+    Cascata de motores:
+      1. Gemini AI (rápido, cota gratuita, mas sobrecarrega às vezes)
+      2. Claude AI (pago, estável — ativa quando Gemini falha/vazio)
+      3. Tesseract OCR (local, último recurso)
     """
 
     def __init__(self):
         self._gemini = GeminiExtractor()
+        self._claude = ClaudeExtractor()
         self._tesseract = TesseractExtractor()
 
-        # Log do status dos motores
         motores = []
         if self._gemini.disponivel:
             motores.append(f"Gemini AI ({GEMINI_MODEL})")
+        if self._claude.disponivel:
+            motores.append(f"Claude AI ({CLAUDE_MODEL})")
         if self._tesseract.disponivel:
             motores.append("Tesseract OCR")
 
         if motores:
             logger.info(f"🔧 Motores de extração ativos: {', '.join(motores)}")
         else:
-            logger.error("❌ NENHUM motor de extração disponível! Configure GEMINI_API_KEY ou instale Tesseract.")
+            logger.error("❌ NENHUM motor de extração disponível! Configure GEMINI_API_KEY, ANTHROPIC_API_KEY ou instale Tesseract.")
+
+    @staticmethod
+    def _resultado_util(resultado: Optional[Dict]) -> bool:
+        """True se o resultado tem fornecedor identificado OU valor > 0."""
+        if not resultado or not resultado.get('processamento_ok'):
+            return False
+        tem_fornecedor = (
+            resultado.get('fornecedor')
+            and resultado['fornecedor'] != 'Não identificado'
+        )
+        tem_valor = resultado.get('valor') and resultado['valor'] > 0
+        return bool(tem_fornecedor or tem_valor)
 
     async def processar_documento(self, arquivo_bytes: bytes, tipo_arquivo: str) -> Dict:
-        """
-        Processar documento e extrair informações estruturadas.
-
-        Tenta Gemini primeiro, depois Tesseract como fallback.
-
-        Args:
-            arquivo_bytes: Bytes do arquivo (imagem ou PDF)
-            tipo_arquivo: Extensão do arquivo (jpg, jpeg, png, pdf)
-
-        Returns:
-            Dict com dados extraídos e metadados de processamento
-        """
+        """Processar documento com cascata Gemini → Claude → Tesseract."""
         tipo_arquivo = tipo_arquivo.lower().strip()
 
         # ── Motor 1: Gemini AI (principal) ──────────────────────────────
         if self._gemini.disponivel:
             logger.info("🤖 Tentando extração com Gemini AI...")
             resultado = await self._gemini.extrair(arquivo_bytes, tipo_arquivo)
+            if self._resultado_util(resultado):
+                logger.info("✅ Extração concluída via Gemini AI")
+                return resultado
+            logger.warning("⚠️ Gemini falhou ou retornou vazio, tentando Claude...")
 
-            if resultado and resultado.get('processamento_ok'):
-                # Validação básica: ao menos fornecedor ou valor devem existir
-                tem_fornecedor = resultado.get('fornecedor') and resultado['fornecedor'] != 'Não identificado'
-                tem_valor = resultado.get('valor') and resultado['valor'] > 0
+        # ── Motor 2: Claude AI (fallback principal) ─────────────────────
+        if self._claude.disponivel:
+            logger.info("🧠 Tentando extração com Claude AI...")
+            resultado = await self._claude.extrair(arquivo_bytes, tipo_arquivo)
+            if self._resultado_util(resultado):
+                logger.info("✅ Extração concluída via Claude AI")
+                return resultado
+            logger.warning("⚠️ Claude também falhou, tentando Tesseract...")
 
-                if tem_fornecedor or tem_valor:
-                    logger.info("✅ Extração concluída via Gemini AI")
-                    return resultado
-                else:
-                    logger.warning("⚠️ Gemini retornou dados insuficientes, tentando fallback...")
-
-        # ── Motor 2: Tesseract OCR (fallback) ───────────────────────────
+        # ── Motor 3: Tesseract OCR (último recurso) ─────────────────────
         if self._tesseract.disponivel:
             logger.info("📝 Tentando extração com Tesseract OCR (fallback)...")
             resultado = await self._tesseract.extrair(arquivo_bytes, tipo_arquivo)

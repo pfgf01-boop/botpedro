@@ -1,12 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { format } from "date-fns";
 import { Plus, ListTodo, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Empty } from "@/components/ui/Empty";
-import { Chip } from "@/components/ui/Chip";
 import {
   usePagamentoListas,
   usePagamentoListaItens,
@@ -30,18 +28,18 @@ export function ListasClient() {
   const lista = listas.find((l) => l.id === selected) ?? null;
   const total = itens.reduce((s, i) => s + Number(i.valor), 0);
   const totalMarcado = itens
-    .filter((i) => i.marcado)
+    .filter((i) => i.pago)
     .reduce((s, i) => s + Number(i.valor), 0);
 
   async function criarListaSemanaAtual() {
     const { inicio, fim } = getPayWeekRange();
     const { data: userData } = await supabase.auth.getUser();
-    const userId = userData.user?.id;
-    if (!userId) return;
+    const authUserId = userData.user?.id;
+    if (!authUserId) return;
     const { data: usuario } = await supabase
       .from("usuarios")
-      .select("empresa_id")
-      .eq("id", userId)
+      .select("id, empresa_id")
+      .eq("auth_user_id", authUserId)
       .single();
     if (!usuario?.empresa_id) return;
 
@@ -50,10 +48,7 @@ export function ListasClient() {
       .insert({
         empresa_id: usuario.empresa_id,
         nome: `Semana ${fmtWeekLabel(inicio, fim)}`,
-        semana_inicio: format(inicio, "yyyy-MM-dd"),
-        semana_fim: format(fim, "yyyy-MM-dd"),
-        status: "aberta",
-        criado_por: userId,
+        criado_por: usuario.id,
       })
       .select("id")
       .single();
@@ -61,42 +56,55 @@ export function ListasClient() {
     setSelected(nova.id);
   }
 
-  // Documentos a vencer na semana da lista selecionada, para sugerir
-  const { rows: docsSemana } = useDocumentos(
-    lista
-      ? {
-          dataInicio: lista.semana_inicio,
-          dataFim: lista.semana_fim,
-          excluirFaturaCartao: false,
-        }
-      : {},
+  // Documentos a vencer na semana atual, para sugerir
+  const { inicio: semanaInicio, fim: semanaFim } = React.useMemo(
+    () => getPayWeekRange(),
+    [],
   );
-  const jaNaLista = new Set(
-    itens.map((i) => i.parcela_id).filter((x): x is string => !!x),
-  );
+  const { rows: docsSemana } = useDocumentos({
+    dataInicio: semanaInicio.toISOString().slice(0, 10),
+    dataFim: semanaFim.toISOString().slice(0, 10),
+    excluirFaturaCartao: false,
+  });
+  const jaNaLista = new Set(itens.map((i) => i.parcela_id));
 
-  async function adicionarSugestao(parcelaId: string, valor: number, label: string) {
+  async function adicionarSugestaoDoc(documentoId: string) {
     if (!lista) return;
+    // Pega a primeira parcela pendente desse documento
+    const { data: parcela } = await supabase
+      .from("parcelas")
+      .select("id")
+      .eq("documento_id", documentoId)
+      .neq("status", "pago")
+      .order("vencimento", { ascending: true })
+      .limit(1)
+      .single();
+    if (!parcela) return;
     await supabase.from("pagamento_lista_itens").insert({
       lista_id: lista.id,
-      parcela_id: parcelaId,
-      descricao: label,
-      valor,
+      parcela_id: parcela.id,
       ordem: itens.length,
     });
     refetch();
   }
 
-  async function toggleMarcado(itemId: string, current: boolean) {
+  async function togglePago(parcelaId: string, current: boolean) {
+    if (!lista) return;
     await supabase
       .from("pagamento_lista_itens")
-      .update({ marcado: !current })
-      .eq("id", itemId);
+      .update({ pago: !current })
+      .eq("lista_id", lista.id)
+      .eq("parcela_id", parcelaId);
     refetch();
   }
 
-  async function removerItem(itemId: string) {
-    await supabase.from("pagamento_lista_itens").delete().eq("id", itemId);
+  async function removerItem(parcelaId: string) {
+    if (!lista) return;
+    await supabase
+      .from("pagamento_lista_itens")
+      .delete()
+      .eq("lista_id", lista.id)
+      .eq("parcela_id", parcelaId);
     refetch();
   }
 
@@ -143,15 +151,8 @@ export function ListasClient() {
               >
                 <p className="text-sm font-medium truncate">{l.nome}</p>
                 <p className="text-xs text-ink-muted mt-1">
-                  {fmtDate(l.semana_inicio, "dd/MM")} →{" "}
-                  {fmtDate(l.semana_fim, "dd/MM")}
+                  {fmtDate(l.criado_em)}
                 </p>
-                <Chip
-                  className="mt-2"
-                  tone={l.status === "aberta" ? "primary" : "secondary"}
-                >
-                  {l.status}
-                </Chip>
               </button>
             ))}
           </div>
@@ -164,13 +165,12 @@ export function ListasClient() {
                     <div>
                       <h2 className="text-base font-semibold">{lista.nome}</h2>
                       <p className="text-xs text-ink-muted">
-                        {fmtDate(lista.semana_inicio)} a{" "}
-                        {fmtDate(lista.semana_fim)}
+                        criada em {fmtDate(lista.criado_em)}
                       </p>
                     </div>
                     <div className="text-right">
                       <p className="text-xs text-ink-muted">
-                        Marcado / total
+                        Pago / total
                       </p>
                       <p className="text-lg font-semibold tabular-nums">
                         {fmtBRL(totalMarcado)} / {fmtBRL(total)}
@@ -189,30 +189,34 @@ export function ListasClient() {
                     <ul className="divide-y divide-surface-3/40">
                       {itens.map((i) => (
                         <li
-                          key={i.id}
+                          key={i.parcela_id}
                           className="flex items-center gap-3 py-2"
                         >
                           <input
                             type="checkbox"
-                            checked={i.marcado}
-                            onChange={() => toggleMarcado(i.id, i.marcado)}
+                            checked={i.pago}
+                            onChange={() => togglePago(i.parcela_id, i.pago)}
                             className="accent-primary-500 w-4 h-4"
                           />
-                          <span
-                            className={cn(
-                              "flex-1 text-sm",
-                              i.marcado &&
-                                "line-through text-ink-muted",
-                            )}
-                          >
-                            {i.descricao ?? "(sem descrição)"}
-                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p
+                              className={cn(
+                                "text-sm truncate",
+                                i.pago && "line-through text-ink-muted",
+                              )}
+                            >
+                              {i.descricao}
+                            </p>
+                            <p className="text-xs text-ink-muted">
+                              vence {fmtDate(i.vencimento)}
+                            </p>
+                          </div>
                           <span className="tabular-nums font-medium">
                             {fmtBRL(Number(i.valor))}
                           </span>
                           <button
                             type="button"
-                            onClick={() => removerItem(i.id)}
+                            onClick={() => removerItem(i.parcela_id)}
                             className="text-xs text-ink-muted hover:text-danger-400"
                           >
                             remover
@@ -237,10 +241,9 @@ export function ListasClient() {
                   ) : (
                     <ul className="divide-y divide-surface-3/40">
                       {docsSemana.map((d) => {
-                        // Para simplicidade: trata documento todo como um item
-                        // (quando houver parcelas, idealmente buscar cada parcela).
                         const pendente = Number(d.valor_pendente ?? 0);
                         if (pendente <= 0) return null;
+                        if (!d.id) return null;
                         return (
                           <li
                             key={d.id}
@@ -266,13 +269,7 @@ export function ListasClient() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() =>
-                                adicionarSugestao(
-                                  d.id,
-                                  pendente,
-                                  `${d.fornecedor_nome ?? "Doc"} · ${d.numero ?? d.id.slice(0, 6)}`,
-                                )
-                              }
+                              onClick={() => d.id && adicionarSugestaoDoc(d.id)}
                               disabled={jaNaLista.has(d.id)}
                             >
                               {jaNaLista.has(d.id) ? "na lista" : "adicionar"}

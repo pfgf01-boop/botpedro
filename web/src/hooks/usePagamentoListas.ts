@@ -2,10 +2,21 @@
 
 import * as React from "react";
 import { getSupabaseBrowser } from "@/lib/supabase/browser";
-import type {
-  PagamentoLista,
-  PagamentoListaItem,
-} from "@/types/domain";
+import type { PagamentoLista } from "@/types/domain";
+
+// Item enriquecido com dados da parcela + documento pra exibição na lista.
+// Schema real só tem { lista_id, parcela_id, pago, ordem } — todo o resto vem do join.
+export interface PagamentoListaItemView {
+  lista_id: string;
+  parcela_id: string;
+  pago: boolean;
+  ordem: number;
+  // joined:
+  valor: number;
+  vencimento: string;
+  descricao: string;
+  documento_id: string | null;
+}
 
 export function usePagamentoListas() {
   const supabase = React.useMemo(() => getSupabaseBrowser(), []);
@@ -17,7 +28,7 @@ export function usePagamentoListas() {
     const { data } = await supabase
       .from("pagamento_listas")
       .select("*")
-      .order("semana_inicio", { ascending: false });
+      .order("criado_em", { ascending: false });
     setListas((data ?? []) as PagamentoLista[]);
     setLoading(false);
   }, [supabase]);
@@ -45,7 +56,7 @@ export function usePagamentoListas() {
 
 export function usePagamentoListaItens(listaId: string | null) {
   const supabase = React.useMemo(() => getSupabaseBrowser(), []);
-  const [itens, setItens] = React.useState<PagamentoListaItem[]>([]);
+  const [itens, setItens] = React.useState<PagamentoListaItemView[]>([]);
   const [loading, setLoading] = React.useState(true);
 
   const load = React.useCallback(async () => {
@@ -57,10 +68,47 @@ export function usePagamentoListaItens(listaId: string | null) {
     setLoading(true);
     const { data } = await supabase
       .from("pagamento_lista_itens")
-      .select("*")
+      .select(
+        `lista_id, parcela_id, pago, ordem,
+         parcelas!inner (
+           id, valor, vencimento, documento_id,
+           documentos!inner ( id, numero_doc, fornecedor_nome )
+         )`,
+      )
       .eq("lista_id", listaId)
       .order("ordem", { ascending: true });
-    setItens((data ?? []) as PagamentoListaItem[]);
+
+    type Row = {
+      lista_id: string;
+      parcela_id: string;
+      pago: boolean;
+      ordem: number;
+      parcelas: {
+        valor: number;
+        vencimento: string;
+        documento_id: string;
+        documentos: {
+          numero_doc: string;
+          fornecedor_nome: string | null;
+        };
+      };
+    };
+
+    const mapped: PagamentoListaItemView[] = ((data ?? []) as unknown as Row[]).map(
+      (r) => ({
+        lista_id: r.lista_id,
+        parcela_id: r.parcela_id,
+        pago: r.pago,
+        ordem: r.ordem,
+        valor: Number(r.parcelas?.valor ?? 0),
+        vencimento: r.parcelas?.vencimento ?? "",
+        descricao: r.parcelas?.documentos?.fornecedor_nome
+          ? `${r.parcelas.documentos.fornecedor_nome} · #${r.parcelas.documentos.numero_doc}`
+          : `#${r.parcelas?.documentos?.numero_doc ?? ""}`,
+        documento_id: r.parcelas?.documento_id ?? null,
+      }),
+    );
+    setItens(mapped);
     setLoading(false);
   }, [supabase, listaId]);
 

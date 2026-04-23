@@ -18,7 +18,6 @@ export function NovoCartaoModal({ open, onClose }: Props) {
   const [final4, setFinal4] = React.useState("");
   const [fech, setFech] = React.useState("");
   const [venc, setVenc] = React.useState("");
-  const [limite, setLimite] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -36,12 +35,12 @@ export function NovoCartaoModal({ open, onClose }: Props) {
     setSaving(true);
     try {
       const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) throw new Error("Sem sessão.");
+      const authUserId = userData.user?.id;
+      if (!authUserId) throw new Error("Sem sessão.");
       const { data: usuario } = await supabase
         .from("usuarios")
         .select("empresa_id")
-        .eq("id", userId)
+        .eq("auth_user_id", authUserId)
         .single();
       if (!usuario?.empresa_id) throw new Error("Empresa não encontrada.");
 
@@ -52,9 +51,6 @@ export function NovoCartaoModal({ open, onClose }: Props) {
         final_4: final4,
         dia_fechamento: fechN,
         dia_vencimento: vencN,
-        limite: limite
-          ? Number(limite.replace(/\./g, "").replace(",", "."))
-          : null,
       });
       if (e) throw e;
       onClose();
@@ -63,7 +59,6 @@ export function NovoCartaoModal({ open, onClose }: Props) {
       setFinal4("");
       setFech("");
       setVenc("");
-      setLimite("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro.");
     } finally {
@@ -135,17 +130,6 @@ export function NovoCartaoModal({ open, onClose }: Props) {
             onChange={(e) => setVenc(e.target.value)}
             inputMode="numeric"
             placeholder="22"
-          />
-        </div>
-        <div className="col-span-2">
-          <label className="text-xs text-ink-muted mb-1 block">
-            Limite (opcional)
-          </label>
-          <Input
-            value={limite}
-            onChange={(e) => setLimite(e.target.value)}
-            placeholder="0,00"
-            inputMode="decimal"
           />
         </div>
       </div>

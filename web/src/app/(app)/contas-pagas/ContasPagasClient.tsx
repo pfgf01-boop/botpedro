@@ -33,6 +33,7 @@ export function ContasPagasClient() {
   const porMes = React.useMemo(() => {
     const map = new Map<string, number>();
     for (const r of rows) {
+      if (!r.data_pagamento) continue;
       const k = format(startOfMonth(new Date(r.data_pagamento)), "yyyy-MM");
       map.set(k, (map.get(k) ?? 0) + Number(r.valor));
     }
@@ -245,7 +246,7 @@ export function ContasPagasClient() {
       <DataTable
         rows={rows}
         columns={columns}
-        rowKey={(r) => r.id}
+        rowKey={(r) => r.id ?? ""}
         loading={loading}
         empty="Nenhum pagamento registrado no período."
       />

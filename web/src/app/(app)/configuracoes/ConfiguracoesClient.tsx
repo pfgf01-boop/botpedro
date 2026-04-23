@@ -27,7 +27,7 @@ export function ConfiguracoesClient() {
         const { data: u } = await supabase
           .from("usuarios")
           .select("empresa_id, empresas(nome, cnpj)")
-          .eq("id", data.user.id)
+          .eq("auth_user_id", data.user.id)
           .single();
         const emp = (u as unknown as { empresas?: { nome: string; cnpj: string | null } })?.empresas;
         if (emp) setEmpresa({ nome: emp.nome, cnpj: emp.cnpj });

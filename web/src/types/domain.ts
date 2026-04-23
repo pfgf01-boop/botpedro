@@ -43,9 +43,11 @@ export type StatusDocumento =
 
 export function computeStatus(doc: DashboardDocumento): StatusDocumento {
   if (doc.is_overdue) return "vencido";
-  if (doc.total_parcelas === 0) return "pendente";
-  if (doc.parcelas_pagas >= doc.total_parcelas) return "pago";
-  if (doc.parcelas_pagas > 0) return "parcial";
+  const total = doc.total_parcelas ?? 0;
+  const pagas = doc.parcelas_pagas ?? 0;
+  if (total === 0) return "pendente";
+  if (pagas >= total) return "pago";
+  if (pagas > 0) return "parcial";
   return "pendente";
 }
 

@@ -38,12 +38,12 @@ export function NovoPagamentoModal({ open, onClose }: Props) {
     setSaving(true);
     try {
       const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) throw new Error("Sem sessão.");
+      const authUserId = userData.user?.id;
+      if (!authUserId) throw new Error("Sem sessão.");
       const { data: usuario } = await supabase
         .from("usuarios")
         .select("empresa_id")
-        .eq("id", userId)
+        .eq("auth_user_id", authUserId)
         .single();
       if (!usuario?.empresa_id) throw new Error("Empresa não encontrada.");
 

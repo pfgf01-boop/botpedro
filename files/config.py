@@ -48,6 +48,10 @@ if not GEMINI_API_KEY:
     print("⚠️ GEMINI_API_KEY não configurado no .env. A extração usará apenas Tesseract OCR (menos preciso).")
     print("   Obtenha uma chave gratuita em: https://aistudio.google.com/")
 
+# ===== CLAUDE AI (Fallback quando Gemini falha) =====
+ANTHROPIC_API_KEY: Final = os.getenv('ANTHROPIC_API_KEY', '')
+CLAUDE_MODEL: Final = os.getenv('CLAUDE_MODEL', 'claude-haiku-4-5')
+
 # ===== TESSERACT OCR (Fallback Local) =====
 # Detectar caminho do Tesseract automaticamente por SO
 import platform
