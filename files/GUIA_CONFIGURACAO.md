@@ -13,7 +13,7 @@ Este guia cobre a instalação e configuração completa do bot do zero em um am
 1. Abra o Telegram e busque **@BotFather**
 2. Envie `/newbot`
 3. Escolha um nome (ex: "Assistente Financeiro FH")
-4. Escolha um username terminando em `bot` (ex: `farmhome_fin_bot`)
+4. Escolha um username terminando em `bot` (ex: `farm_fin_bot`)
 5. Salve o **token** gerado — é a senha do bot
 
 ### 1.2 Obter seu User ID
