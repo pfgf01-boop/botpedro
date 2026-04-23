@@ -1,4 +1,4 @@
-# GUIA DE CONFIGURAÇÃO — Bot Telegram Farm Home
+# GUIA DE CONFIGURAÇÃO — Bot Telegram Farm
 
 ## Visão Geral
 
@@ -80,8 +80,8 @@ CREATE TABLE parcelas (
 ### 2.3 Inserir sua Empresa
 
 No painel, vá em **Table Editor → empresas → Insert row** e cadastre:
-- `nome`: Farm Home Comércio de Móveis e Eletrônicos LTDA
-- `cnpj`: 35955650000175
+- `nome`: 
+- `cnpj`: 
 
 ### 2.4 Obter Credenciais
 
