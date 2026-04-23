@@ -1,4 +1,4 @@
-# Bot Telegram - Gestão Financeira Farm Home
+# Bot Telegram - Gestão Financeira 
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![Telegram](https://img.shields.io/badge/Telegram-Bot_API-blue.svg)](https://core.telegram.org/bots/api)
@@ -22,7 +22,7 @@ Assistente automatizado para gestão de documentos fiscais via Telegram, com arm
 
 ## Sobre o Projeto
 
-Bot automatiza captura, processamento e gestão de documentos fiscais (notas fiscais, boletos, pedidos, recibos) para a Farm Home Comércio de Móveis e Eletrônicos.
+Bot automatiza captura, processamento e gestão de documentos fiscais (notas fiscais, boletos, pedidos, recibos) para a Farm 
 
 **Versão atual:** 2.2  
 **Status:** Produção  
